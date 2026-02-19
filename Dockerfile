@@ -1,0 +1,40 @@
+# Stage 1: Build stage
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache git
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o apitrackingsystem .
+
+# Stage 2: Runtime stage
+FROM alpine:latest
+
+WORKDIR /app
+
+# Install runtime dependencies (if needed for your app)
+RUN apk --no-cache add ca-certificates
+
+# Copy the binary from builder
+COPY --from=builder /app/apitrackingsystem .
+
+# Expose port
+EXPOSE 5009
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:5009/ || exit 1
+
+# Run the application
+CMD ["./apitrackingsystem"]

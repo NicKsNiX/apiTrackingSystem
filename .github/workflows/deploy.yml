@@ -1,0 +1,82 @@
+name: Build and Deploy API Tracking System
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/api-tracking-system:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/api-tracking-system:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/api-tracking-system:${{ github.ref_name }}-${{ github.run_number }}
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/api-tracking-system:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/api-tracking-system:buildcache,mode=max
+
+  deploy:
+    needs: build
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        run: echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Pull latest Docker image
+        run: |
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/api-tracking-system:latest
+
+      - name: Stop and remove old container
+        run: |
+          docker stop api-tracking-system || true
+          docker rm api-tracking-system || true
+
+      - name: Load environment file
+        run: |
+          sudo cp /etc/api-tracking-system/.env .env || echo "Warning: .env file not found in /etc/api-tracking-system/"
+
+      - name: Run new container
+        run: |
+          docker run -d \
+            --name api-tracking-system \
+            -p 5009:5009 \
+            --restart unless-stopped \
+            --env-file .env \
+            --health-cmd="wget --no-verbose --tries=1 --spider http://localhost:5009/ || exit 1" \
+            --health-interval=30s \
+            --health-timeout=3s \
+            --health-retries=3 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/api-tracking-system:latest
+
+      - name: Verify container is running
+        run: |
+          sleep 10
+          docker ps -a --filter "name=api-tracking-system"
+
+      - name: Cleanup old images
+        run: |
+          docker image prune -af --filter "until=24h"

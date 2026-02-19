@@ -1,0 +1,62 @@
+name: Manual Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Docker Tag to rollback to (e.g., latest, main-123, or full commit hash)'
+        required: true
+        default: 'latest'
+
+jobs:
+  rollback:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        run: echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Pull Docker Image
+        run: |
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/api-tracking-system:${{ github.event.inputs.tag }}
+          echo "Successfully pulled image: ${{ secrets.DOCKERHUB_USERNAME }}/api-tracking-system:${{ github.event.inputs.tag }}"
+
+      - name: Stop and remove old container
+        run: |
+          docker stop api-tracking-system || true
+          docker rm api-tracking-system || true
+          echo "Old container stopped and removed"
+
+      - name: Load environment file
+        run: |
+          sudo cp /etc/api-tracking-system/.env .env || echo "Warning: .env file not found in /etc/api-tracking-system/"
+
+      - name: Run Rollback container
+        run: |
+          docker run -d \
+            --name api-tracking-system \
+            -p 5009:5009 \
+            --restart unless-stopped \
+            --env-file .env \
+            --health-cmd="wget --no-verbose --tries=1 --spider http://localhost:5009/ || exit 1" \
+            --health-interval=30s \
+            --health-timeout=3s \
+            --health-retries=3 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/api-tracking-system:${{ github.event.inputs.tag }}
+
+      - name: Verify rollback
+        run: |
+          sleep 10
+          docker ps -a --filter "name=api-tracking-system"
+          docker logs api-tracking-system --tail 20
+
+      - name: Create deployment summary
+        run: |
+          echo "### Rollback Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: ${{ github.event.inputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Rolled back by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Container Status**: Running" >> $GITHUB_STEP_SUMMARY
