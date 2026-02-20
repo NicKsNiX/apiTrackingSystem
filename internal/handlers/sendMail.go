@@ -24,20 +24,18 @@ import (
 
 // MailData represents email data for project items
 type MailData struct {
-	ProjectCode sql.NullString `db:"ip_code"`
-	PartName    sql.NullString `db:"ip_part_name"`
-	PartNo      sql.NullString `db:"ip_part_no"`
-	IpModel     sql.NullString `db:"ip_model"`
-	ItemName    sql.NullString `db:"item_name"`
-	ItemType    sql.NullString `db:"item_type"`
-	StartDate   sql.NullTime   `db:"start_date"`
-	EndDate     sql.NullTime   `db:"end_date"`
-	OwnerSuID   sql.NullInt64  `db:"owner_su_id"`
-	IpidID      sql.NullInt64  `db:"ipid_id"`
-	IpidStatus  sql.NullString `db:"ipid_status"`
-	PicEmpCode  sql.NullString `db:"su_emp_code"`
-	PicFirst    sql.NullString `db:"su_firstname"`
-	PicLast     sql.NullString `db:"su_lastname"`
+	ProjectCode   sql.NullString `db:"ip_code"`
+	PartName      sql.NullString `db:"ip_part_name"`
+	PartNo        sql.NullString `db:"ip_part_no"`
+	IpModel       sql.NullString `db:"ip_model"`
+	ItemName      sql.NullString `db:"item_name"`
+	ItemType      sql.NullString `db:"item_type"`
+	StartDate     sql.NullTime   `db:"start_date"`
+	EndDate       sql.NullTime   `db:"end_date"`
+	IpidStatus    sql.NullString `db:"ipid_status"`
+	OwnerSuIDs    sql.NullString `db:"owner_su_ids"`
+	OwnerNames    sql.NullString `db:"owner_names"`
+	OwnerEmpCodes sql.NullString `db:"owner_emp_codes"`
 }
 
 func SendMail(to []string, subject, body, contentType string) error {
@@ -263,12 +261,12 @@ func applySheetSetup(f *excelize.File, sheet string) {
 	_ = f.SetColWidth(sheet, "C", "C", 12.09)
 	_ = f.SetColWidth(sheet, "D", "D", 14.73)
 	_ = f.SetColWidth(sheet, "E", "E", 14.63)
-	_ = f.SetColWidth(sheet, "F", "F", 13.91)
-	_ = f.SetColWidth(sheet, "G", "G", 31.91)
+	_ = f.SetColWidth(sheet, "F", "F", 18)
+	_ = f.SetColWidth(sheet, "G", "G", 25.91)
 }
 
 // buildStyles creates and returns style format IDs for the workbook
-func buildStyles(f *excelize.File) (base, title, header, statusDone, statusDelay, statusInprog int, err error) {
+func buildStyles(f *excelize.File) (base, title, header, statusDone, statusDelay, statusInprog, statusWaiting, statusReject int, err error) {
 	// Base style with borders and center alignment
 	base, err = f.NewStyle(&excelize.Style{
 		Border: []excelize.Border{
@@ -402,6 +400,58 @@ func buildStyles(f *excelize.File) (base, title, header, statusDone, statusDelay
 		return
 	}
 
+	// Status Waiting: white bold text on light purple background
+	statusWaiting, err = f.NewStyle(&excelize.Style{
+		Border: []excelize.Border{
+			{Type: "left", Color: "000000", Style: 1},
+			{Type: "right", Color: "000000", Style: 1},
+			{Type: "top", Color: "000000", Style: 1},
+			{Type: "bottom", Color: "000000", Style: 1},
+		},
+		Font: &excelize.Font{
+			Bold:  true,
+			Color: "FFFFFF",
+		},
+		Fill: excelize.Fill{
+			Type:    "pattern",
+			Pattern: 1,
+			Color:   []string{"9B59B6"},
+		},
+		Alignment: &excelize.Alignment{
+			Horizontal: "center",
+			Vertical:   "center",
+		},
+	})
+	if err != nil {
+		return
+	}
+
+	// Status Reject: white bold text on orange background
+	statusReject, err = f.NewStyle(&excelize.Style{
+		Border: []excelize.Border{
+			{Type: "left", Color: "000000", Style: 1},
+			{Type: "right", Color: "000000", Style: 1},
+			{Type: "top", Color: "000000", Style: 1},
+			{Type: "bottom", Color: "000000", Style: 1},
+		},
+		Font: &excelize.Font{
+			Bold:  true,
+			Color: "FFFFFF",
+		},
+		Fill: excelize.Fill{
+			Type:    "pattern",
+			Pattern: 1,
+			Color:   []string{"FF6600"},
+		},
+		Alignment: &excelize.Alignment{
+			Horizontal: "center",
+			Vertical:   "center",
+		},
+	})
+	if err != nil {
+		return
+	}
+
 	return
 }
 
@@ -413,7 +463,7 @@ func buildTitleBlock(f *excelize.File, sheet string, titleStyle int) {
 }
 
 // statusStyle returns the appropriate style based on status value
-func statusStyle(status string, done, delay, inprog, base int) int {
+func statusStyle(status string, done, delay, inprog, waiting, reject, base int) int {
 	s := strings.ToLower(strings.TrimSpace(status))
 	switch s {
 	case "done":
@@ -422,8 +472,30 @@ func statusStyle(status string, done, delay, inprog, base int) int {
 		return delay
 	case "inprogress":
 		return inprog
+	case "waiting":
+		return waiting
+	case "reject":
+		return reject
 	default:
 		return base
+	}
+}
+
+// statusDisplayText maps status values to display text
+func statusDisplayText(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "waiting":
+		return "Waiting Approve"
+	case "done":
+		return "Done"
+	case "delay":
+		return "Delay"
+	case "inprogress":
+		return "Inprogress"
+	case "reject":
+		return "Reject"
+	default:
+		return strings.Title(strings.ToLower(status))
 	}
 }
 
@@ -434,7 +506,7 @@ func writeProjectBlock(
 	startRow int,
 	projectCode, partNo, partName, model, template string,
 	rows []MailData,
-	baseStyle, headerStyle, stDone, stDelay, stInprog int,
+	baseStyle, headerStyle, stDone, stDelay, stInprog, stWaiting, stReject int,
 ) (nextRow int) {
 
 	r := startRow
@@ -484,15 +556,15 @@ func writeProjectBlock(
 		_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", dr), getStringValue(it.ItemType))
 		_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", dr), getDateValue(it.StartDate))
 		_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", dr), getDateValue(it.EndDate))
-		_ = f.SetCellValue(sheet, fmt.Sprintf("F%d", dr), strings.Title(strings.ToLower(getStringValue(it.IpidStatus))))
-		_ = f.SetCellValue(sheet, fmt.Sprintf("G%d", dr), getPicValue(it.PicEmpCode, it.PicFirst))
+		_ = f.SetCellValue(sheet, fmt.Sprintf("F%d", dr), statusDisplayText(getStringValue(it.IpidStatus)))
+		_ = f.SetCellValue(sheet, fmt.Sprintf("G%d", dr), getStringValue(it.OwnerNames))
 
 		// Apply base style to non-status columns
 		_ = f.SetCellStyle(sheet, fmt.Sprintf("B%d", dr), fmt.Sprintf("E%d", dr), baseStyle)
 		_ = f.SetCellStyle(sheet, fmt.Sprintf("G%d", dr), fmt.Sprintf("G%d", dr), baseStyle)
 
 		// Apply status style to Status column
-		st := statusStyle(getStringValue(it.IpidStatus), stDone, stDelay, stInprog, baseStyle)
+		st := statusStyle(getStringValue(it.IpidStatus), stDone, stDelay, stInprog, stWaiting, stReject, baseStyle)
 		_ = f.SetCellStyle(sheet, fmt.Sprintf("F%d", dr), fmt.Sprintf("F%d", dr), st)
 
 		dr++
@@ -508,7 +580,7 @@ func writeProjectBlock(
 
 func SendMailAuto(c *fiber.Ctx, db *sqlx.DB) error {
 
-	sqlQuery := `SELECT DISTINCT
+	sqlQuery := `SELECT
 					ip.ip_code,
 					ip.ip_part_name,
 					ip.ip_part_no,
@@ -517,51 +589,64 @@ func SendMailAuto(c *fiber.Ctx, db *sqlx.DB) error {
 					x.item_type,
 					x.start_date,
 					x.end_date,
-					x.owner_su_id,
-					x.ipid_id,
 					x.ipid_status,
-					su.su_emp_code,
-					su.su_firstname,
-					su.su_lastname
+					GROUP_CONCAT(DISTINCT x.owner_su_id ORDER BY x.owner_su_id SEPARATOR '/') AS owner_su_ids,
+					GROUP_CONCAT(
+						DISTINCT CONCAT('K.',su.su_firstname)
+						ORDER BY su.su_firstname
+						SEPARATOR '/'
+					) AS owner_names,
+					GROUP_CONCAT(
+						DISTINCT su.su_emp_code
+						ORDER BY su.su_emp_code
+						SEPARATOR '/'
+					) AS owner_emp_codes
 				FROM
 				(
 						SELECT
 							ai.ip_id                                   AS ip_id,
 							ai.iai_name                                AS item_name,
 							pid.ipid_type                              AS item_type,
-							COALESCE(pid.su_id,pid.ipid_line_code)         AS owner_su_id,
+							COALESCE(pid.su_id, pid.ipid_line_code)    AS owner_su_id,
 							pid.ipid_start_date                        AS start_date,
 							pid.ipid_end_date                          AS end_date,
 							pid.ipid_id                                AS ipid_id,
 							pid.ipid_status                            AS ipid_status
 						FROM info_project_item_detail pid
 						JOIN info_apqp_item ai
-						ON ai.iai_id = pid.ref_id
-						AND pid.ipid_type = 'apqp'
-                        
+							ON ai.iai_id = pid.ref_id
+						   AND pid.ipid_type = 'apqp'
+
 						UNION ALL
 
 						SELECT
 							pi.ip_id                                   AS ip_id,
 							pi.ipi_name                                AS item_name,
 							pid.ipid_type                              AS item_type,
-							COALESCE(pid.su_id,pid.ipid_line_code)         AS owner_su_id,
+							COALESCE(pid.su_id, pid.ipid_line_code)    AS owner_su_id,
 							pid.ipid_start_date                        AS start_date,
 							pid.ipid_end_date                          AS end_date,
 							pid.ipid_id                                AS ipid_id,
 							pid.ipid_status                            AS ipid_status
 						FROM info_project_item_detail pid
 						JOIN info_ppap_item pi
-							ON pi.ipi_id = pid.ref_id  AND pid.ipid_type = 'ppap'
-						AND pid.ipid_type = 'ppap'
-                        
+							ON pi.ipi_id = pid.ref_id
+						   AND pid.ipid_type = 'ppap'
 				) x
 				LEFT JOIN sys_user su
 					ON su.su_id = x.owner_su_id
-				LEFT JOIN info_project ip 
+				LEFT JOIN info_project ip
 					ON x.ip_id = ip.ip_id
-				
-
+				GROUP BY
+					ip.ip_code,
+					ip.ip_part_name,
+					ip.ip_part_no,
+					ip.ip_model,
+					x.item_name,
+					x.item_type,
+					x.start_date,
+					x.end_date,
+					x.ipid_status
 				ORDER BY
 					x.item_type ASC,
 					x.start_date ASC,
@@ -610,7 +695,7 @@ func SendMailAuto(c *fiber.Ctx, db *sqlx.DB) error {
 	f := excelize.NewFile()
 
 	// Build styles upfront
-	baseStyle, titleStyle, headerStyle, stDone, stDelay, stInprog, err := buildStyles(f)
+	baseStyle, titleStyle, headerStyle, stDone, stDelay, stInprog, stWaiting, stReject, err := buildStyles(f)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to build styles", "detail": err.Error()})
 	}
@@ -681,7 +766,7 @@ func SendMailAuto(c *fiber.Ctx, db *sqlx.DB) error {
 				templateName,
 				group,
 				baseStyle, headerStyle,
-				stDone, stDelay, stInprog,
+				stDone, stDelay, stInprog, stWaiting, stReject,
 			)
 		}
 	}
@@ -712,6 +797,13 @@ func getStringValue(ns sql.NullString) string {
 func getDateValue(nt sql.NullTime) string {
 	if nt.Valid {
 		return nt.Time.Format("2006-01-02")
+	}
+	return "-"
+}
+
+func getPicFirstName(first sql.NullString) string {
+	if first.Valid && strings.TrimSpace(first.String) != "" {
+		return "K. " + strings.TrimSpace(first.String)
 	}
 	return "-"
 }

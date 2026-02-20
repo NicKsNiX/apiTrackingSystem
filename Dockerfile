@@ -30,11 +30,11 @@ RUN apk --no-cache add ca-certificates
 COPY --from=builder /app/apitrackingsystem .
 
 # Expose port
-EXPOSE 5009
+EXPOSE 9004
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:5009/ || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:9005/ || exit 1
 
 # Run the application
 CMD ["./apitrackingsystem"]

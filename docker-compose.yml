@@ -1,0 +1,18 @@
+services:
+  app:
+    build: .
+    ports:
+      - "9005:9005"
+    env_file:
+      - .env
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: rebuild
+          path: .
+          ignore:
+            - tmp/
+            - .git/

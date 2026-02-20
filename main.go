@@ -47,7 +47,7 @@ func main() {
 	// รันเซิร์ฟเวอร์
 	addr := cfg.AppAddr
 	if addr == "" {
-		addr = ":9004"
+		addr = ":9005"
 	}
 	log.Printf("listening on %s", addr)
 	if err := app.Listen(addr); err != nil {

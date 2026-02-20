@@ -160,3 +160,5 @@ func Setup(app *fiber.App, db *sqlx.DB) {
 // http://192.168.161.219:9004/apiTrackingSystem/manageModel/InsertModelMaster
 // http://192.168.161.219:9004/apiTrackingSystem/manageModel/UpdateModelMaster
 // http://192.168.161.219:9004/apiTrackingSystem/manageModel/UpdateModelMasterStatus
+// docker compose down
+// docker compose up -d --build
